@@ -5,9 +5,6 @@
 #include "datalink.h"
 
 #define DATA_TIMER  2000
-#define DATA 0
-#define ACK  1
-#define NAK  2
 #define MAX_SEQ  7
 #define INC(n) (n = n < MAX_SEQ ? n+1 : 0) 
 
@@ -34,7 +31,7 @@ static boolean between(unsigned char a, unsigned char b, unsigned char c)
 	}
 }
 
-static void send_frame_G(unsigned char frame_kind, unsigned char frame_nr, unsigned char frame_expected, unsigned char *packet, unsigned int len)
+static void send_frame(unsigned char frame_kind, unsigned char frame_nr, unsigned char frame_expected, unsigned char *packet, unsigned int len)
 {
 	struct FRAME f;
 	f.kind = frame_kind;
@@ -66,6 +63,21 @@ void Go_back_n()
 
 	struct FRAME f;
 
+	protocol_init(argc, argv);
+	disable_network_layer();
+
+	while (1)
+	{
+		event = wait_for_event(&timeout_seq);
+
+		switch (event)
+		{
+		case NETWORK_LAYER_READY:
+			pkt_len[next_frame_to_send] = get_packet(buffer[next_frame_to_send]);
+			nbuffer++;
+			
+		}
+	}
 }
 void selective();
 int main(int argc, char** argv)
