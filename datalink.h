@@ -8,9 +8,10 @@
 #define FRAME_NAK  3
 
 #define DATA_TIMER  2000
-#define ACK_TIMER   340
+#define ACK_TIMER   500
 #define MAX_SEQ  7
 #define INC(n) (n = n < MAX_SEQ ? n+1 : 0) 
+#define NR_BUF ((MAX_SEQ + 1) / 2)
 
 struct FRAME
 {
