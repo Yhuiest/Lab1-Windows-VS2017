@@ -76,16 +76,20 @@ void Go_back_n(int argc, char** argv)
 		switch (event)
 		{
 		case NETWORK_LAYER_READY:
+			dbg_event("NETWORK_LAYER_READY!\n");
 			pkt_len[next_frame_to_send] = get_packet(buffer[next_frame_to_send]);
 			nbuffer++;
             send_frame_to_physical(FRAME_DATA, next_frame_to_send,
                 frame_expected, buffer[next_frame_to_send],
                 pkt_len[next_frame_to_send]);
+			start_timer(next_frame_to_send, DATA_TIMER);
             stop_ack_timer();
             physical_layer_ready = false;
+			dbg_event("PHYSICAL_LAYER_NOT_READY!\n");
             INC(next_frame_to_send);
             break;
         case PHYSICAL_LAYER_READY:
+			dbg_event("PHYSICAL_LAYER_READY!\n");
             physical_layer_ready = true;
             //dealing goback frame
             if (sending_goback_frame == true)
@@ -105,6 +109,7 @@ void Go_back_n(int argc, char** argv)
             }
             break;
         case FRAME_RECEIVED:
+			dbg_event("FRAME_RECEIVE!\n");
             frame_len = recv_frame(&f, sizeof(struct FRAME));
 
             //frame receive is broken
@@ -127,7 +132,7 @@ void Go_back_n(int argc, char** argv)
                 dbg_frame("Receive ack frame,ack:%d len:%d\n", f.ack,frame_len);
             }
             //ack is expected
-            while (between(ack_expected, f.ack, next_frame_to_send))
+            if (ack_expected == f.ack)
             {
 				if (nbuffer > 0)
 				{
@@ -138,23 +143,40 @@ void Go_back_n(int argc, char** argv)
             }
             break;
         case DATA_TIMEOUT:
+			dbg_event("DATA_TIMEOUT!\n");
             dbg_event("Data timer timeout!Resend frames.\n");
             next_frame_to_send = ack_expected;
             sending_goback_frame = true;
+			send_frame_to_physical(FRAME_DATA, next_frame_to_send, frame_expected,
+				buffer[next_frame_to_send], pkt_len[next_frame_to_send]);
+			start_timer(next_frame_to_send, DATA_TIMER);
+			INC(next_frame_to_send);
+			physical_layer_ready = false;
+			nbuffer--;
+			//all done
+			if (nbuffer == 0)
+			{
+				sending_goback_frame = false;
+				enable_network_layer();
+			}
             disable_network_layer();
             break;
         case ACK_TIMEOUT:
+			dbg_event("ACK_TIMEOUT!\n");
             dbg_event("ACK timer timeout!Send a ACK frame.\n");
             send_frame_to_physical(FRAME_ACK, next_frame_to_send, frame_expected, buffer[next_frame_to_send], 0);
 			stop_ack_timer();
             break;
 		}
-        if (nbuffer < MAX_SEQ && physical_layer_ready == true)
+        if (nbuffer < MAX_SEQ && physical_layer_ready == true && sending_goback_frame == false)
         {
+			dbg_event("enable_network_layer\n");
             enable_network_layer();
         }
         else
         {
+			dbg_event("%d %d %d\n", nbuffer , physical_layer_ready == true, sending_goback_frame == false);
+			dbg_event("disable_network_layer\n");
             disable_network_layer();
         }
 	}
