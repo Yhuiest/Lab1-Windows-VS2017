@@ -14,15 +14,23 @@ static boolean between(unsigned char a, unsigned char b, unsigned char c)
 	}
 }
 
+static void put_frame(unsigned char *frame, int len)
+{
+	*(unsigned int *)(frame + len) = crc32(frame, len);
+
+	// sizeof (frame + checksum)
+	send_frame(frame, len + sizeof(unsigned int));
+}
+
 static void send_frame_to_physical(unsigned char frame_kind, unsigned char frame_nr, unsigned char frame_expected, unsigned char *packet, unsigned int len)
 {
 	struct FRAME f;
 	f.kind = frame_kind;
+	f.seq = frame_nr;
 
 	if (frame_kind == FRAME_DATA)
 	{
-		strncpy_s(f.data, len, packet, len);
-        f.seq = frame_nr;
+		memcpy(f.data, packet, len);
 	}
 
     if (f.kind == FRAME_NAK)
@@ -33,14 +41,10 @@ static void send_frame_to_physical(unsigned char frame_kind, unsigned char frame
     {
         f.ack = (frame_expected + MAX_SEQ) % (MAX_SEQ + 1);
     }
+	put_frame((unsigned char *)&f, len + 3);
 
-	*(unsigned int *)(packet + len) = crc32(packet, len);
+    dbg_frame("Send DATA %d %d, ID %d,\n", f.seq, f.ack, *(short*)f.data);
 
-    send_frame(&f, 3 + len + sizeof(unsigned int));
-
-    dbg_frame("Send DATA %d %d, ID %d\n", f.seq, f.ack, *(short*)f.data);
-
-	start_timer(f.seq, DATA_TIMER);
 }
 
 void Go_back_n(int argc, char** argv)
@@ -88,6 +92,7 @@ void Go_back_n(int argc, char** argv)
             {
                 send_frame_to_physical(FRAME_DATA, next_frame_to_send, frame_expected,
                     buffer[next_frame_to_send], pkt_len[next_frame_to_send]);
+				start_timer(next_frame_to_send, DATA_TIMER);
                 INC(next_frame_to_send);
                 physical_layer_ready = false;
                 nbuffer--;
@@ -103,41 +108,45 @@ void Go_back_n(int argc, char** argv)
             frame_len = recv_frame(&f, sizeof(struct FRAME));
 
             //frame receive is broken
-            if (frame_len < 5 || crc32((unsigned char*)&f, frame_len));
+            if (frame_len < 5 || crc32((unsigned char*)&f, frame_len) != 0)
             {
-                dbg_frame("Receive error! Bad CRC checkcum.");
+                dbg_frame("Receive error! Bad CRC checkcum.seq:%d ack:%d len:%d\n",f.seq,f.ack,frame_len);
                 break;
             }
 
             //arrived frame is expected
             if (f.kind == FRAME_DATA && f.seq == frame_expected)
             {
-                dbg_frame("Receive data frame,seq:%d,ack:%d", f.seq, f.ack);
+                dbg_frame("Receive data frame,seq:%d,ack:%d\n", f.seq, f.ack);
                 put_packet(f.data, frame_len - 3 - sizeof(unsigned int));
                 INC(frame_expected);
-                start_ack_timer(ACK_TIMEOUT);
+                start_ack_timer(ACK_TIMER);
             }
             else
             {
-                dbg_frame("Receive ack frame,ack:%d", f.ack);
+                dbg_frame("Receive ack frame,ack:%d len:%d\n", f.ack,frame_len);
             }
             //ack is expected
             while (between(ack_expected, f.ack, next_frame_to_send))
             {
-                nbuffer--;
+				if (nbuffer > 0)
+				{
+					nbuffer--;
+				}
                 stop_timer(ack_expected);
                 INC(ack_expected);
             }
             break;
         case DATA_TIMEOUT:
-            dbg_event("Data timer timeout!Resend frames.");
+            dbg_event("Data timer timeout!Resend frames.\n");
             next_frame_to_send = ack_expected;
             sending_goback_frame = true;
             disable_network_layer();
             break;
         case ACK_TIMEOUT:
-            dbg_event("ACK timer timeout!Send a ACK frame.");
-            send_frame_to_physical(FRAME_ACK, 0, frame_expected, NULL, 0);
+            dbg_event("ACK timer timeout!Send a ACK frame.\n");
+            send_frame_to_physical(FRAME_ACK, next_frame_to_send, frame_expected, buffer[next_frame_to_send], 0);
+			stop_ack_timer();
             break;
 		}
         if (nbuffer < MAX_SEQ && physical_layer_ready == true)

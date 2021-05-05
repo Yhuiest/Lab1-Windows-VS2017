@@ -8,7 +8,7 @@
 #define FRAME_NAK  3
 
 #define DATA_TIMER  2000
-#define ACK_TIMER   240
+#define ACK_TIMER   340
 #define MAX_SEQ  7
 #define INC(n) (n = n < MAX_SEQ ? n+1 : 0) 
 
