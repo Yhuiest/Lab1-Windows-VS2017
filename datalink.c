@@ -20,7 +20,7 @@ static void put_frame(unsigned char *frame, int len)
 
 	// sizeof (frame + checksum)
 	send_frame(frame, len + sizeof(unsigned int));
-	dbg_event("len:%d\n", len);
+	dbg_event("len:%d\n", len + sizeof(unsigned int));
 }
 
 static void send_frame_to_physical(unsigned char frame_kind, unsigned char frame_nr, unsigned char frame_expected, unsigned char *packet, unsigned int len)
@@ -213,7 +213,7 @@ void selective(int argc,char** argv)
 	unsigned char event;
 	int timeout_seq;
 
-	boolean phl_ready = true;
+	boolean phl_ready = false;
 
 	protocol_init(argc, argv);
 	disable_network_layer();
@@ -234,9 +234,10 @@ void selective(int argc,char** argv)
 				, out_packet_len[next_frame_to_send % NR_BUF]);
 			//dbg_frame("Send DATA %d %d, ID %d,\n", f.seq, f.ack, *(short*)f.data);
 			start_timer(next_frame_to_send % NR_BUF, DATA_TIMER);
-			phl_ready = false;
 			dbg_event("PHYSICAL_LAYER_NOT_READY!\n");
 			stop_ack_timer();
+			INC(next_frame_to_send);
+			nbuffered++;
 			break;
 		case PHYSICAL_LAYER_READY:
 			phl_ready = true;
@@ -245,7 +246,6 @@ void selective(int argc,char** argv)
 		case FRAME_RECEIVED:
 			dbg_event("FRAME_RECEIVE!\n");
 			frame_len = recv_frame((unsigned char *)&f, sizeof(struct FRAME));
-			in_packet_len[f.seq % NR_BUF] = frame_len;
 			if (crc32((unsigned char *)&f, frame_len))
 			{
 				dbg_frame("Receive error! Bad CRC checkcum.seq:%d ack:%d len:%d\n", f.seq, f.ack, frame_len);
@@ -259,13 +259,22 @@ void selective(int argc,char** argv)
 			}
 			if (f.kind == FRAME_DATA)
 			{
+				in_packet_len[f.seq % NR_BUF] = frame_len;
 				dbg_frame("Receive data frame,len:%d,seq:%d,ack:%d,ack_e:%d,ID:%d\n",
 					frame_len, f.seq, f.ack, ack_expected, *(short*)f.data);
 				if ((f.seq != frame_expected) && no_nak == true)
 				{
+					dbg_event("send a nak frame.\n");
 					send_frame_to_physical(FRAME_NAK, 0, frame_expected
 						, NULL,0);
+					no_nak = false;
+					stop_ack_timer();
 				}
+				else
+				{
+					start_ack_timer(ACK_TIMER);
+				}
+
 				if (between(frame_expected, f.seq, too_far) == true
 					&& (arrived[f.seq % NR_BUF]) == false)
 				{
@@ -273,7 +282,8 @@ void selective(int argc,char** argv)
 					memcpy(in_buf[f.seq % NR_BUF], f.data, PKT_LEN);
 					while (arrived[frame_expected % NR_BUF] == true)
 					{
-						put_frame(in_buf[frame_expected % NR_BUF], in_packet_len[frame_expected % NR_BUF]);
+						dbg_frame("pkt_len:%d\n", in_packet_len[frame_expected % NR_BUF] - 3 - sizeof(unsigned int));
+						put_packet(in_buf[frame_expected % NR_BUF], in_packet_len[frame_expected % NR_BUF] - 3 - sizeof(unsigned int));;
 						no_nak = true;
 						arrived[frame_expected % NR_BUF] = false;
 						INC(frame_expected);
@@ -287,7 +297,9 @@ void selective(int argc,char** argv)
 			{
 				dbg_frame("Receive nak frame,ack:%d len:%d ack_e:%d\n", f.ack, frame_len, ack_expected);
 				send_frame_to_physical(FRAME_DATA, (f.ack + 1) % (MAX_SEQ + 1), frame_expected
-					, out_buf[(f.ack + 1) % (MAX_SEQ + 1)], out_packet_len[(f.ack + 1) % (MAX_SEQ + 1)]);
+					, out_buf[(f.ack + 1) % NR_BUF], out_packet_len[(f.ack + 1) % NR_BUF]);
+				start_timer((f.ack + 1) % NR_BUF,DATA_TIMER);
+				stop_ack_timer();
 			}
 			while (between(ack_expected, f.ack, next_frame_to_send) == true)
 			{
@@ -297,13 +309,16 @@ void selective(int argc,char** argv)
 			}
 			break;
 		case DATA_TIMEOUT:
-			dbg_event("Data timer timeout!Resend frames.\n");
-			send_frame_to_physical(FRAME_DATA, timeout_seq, frame_expected
-				, out_buf[timeout_seq], out_packet_len[timeout_seq]);
+			dbg_event("Data timer timeout!Resend frames.seq:%d\n",timeout_seq);
+			send_frame_to_physical(FRAME_DATA, timeout_seq , frame_expected
+				, out_buf[timeout_seq % NR_BUF], out_packet_len[timeout_seq % NR_BUF]);
+			start_timer(timeout_seq % NR_BUF, DATA_TIMER);
+			stop_ack_timer();
 			break;
 		case ACK_TIMEOUT:
 			dbg_event("ACK timer timeout!Send a ACK frame.\n");
 			send_frame_to_physical(FRAME_ACK, 0, frame_expected, NULL, 0);
+			stop_ack_timer();
 		}
 		if (nbuffered < NR_BUF && phl_ready == true)
 		{
