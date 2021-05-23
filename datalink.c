@@ -223,7 +223,7 @@ void selective(int argc,char** argv)
 				, next_frame_to_send, frame_expected
 				, out_buf[next_frame_to_send % NR_BUF]
 				, out_packet_len[next_frame_to_send % NR_BUF]);
-			start_timer(next_frame_to_send % NR_BUF, DATA_TIMER);
+			start_timer(next_frame_to_send , DATA_TIMER);
 			stop_ack_timer();
 			INC(next_frame_to_send);
 			nbuffered++;
@@ -268,6 +268,7 @@ void selective(int argc,char** argv)
 					memcpy(in_buf[f.seq % NR_BUF], f.data, PKT_LEN);
 					while (arrived[frame_expected % NR_BUF] == true)
 					{
+						dbg_event("to network:%d\n", frame_expected % NR_BUF);
 						put_packet(in_buf[frame_expected % NR_BUF], in_packet_len[frame_expected % NR_BUF] - 3 - sizeof(unsigned int));;
 						no_nak = true;
 						arrived[frame_expected % NR_BUF] = false;
@@ -282,20 +283,21 @@ void selective(int argc,char** argv)
 			{
 				send_frame_to_physical(FRAME_DATA, (f.ack + 1) % (MAX_SEQ + 1), frame_expected
 					, out_buf[(f.ack + 1) % NR_BUF], out_packet_len[(f.ack + 1) % NR_BUF]);
-				start_timer((f.ack + 1) % NR_BUF,DATA_TIMER);
+				start_timer((f.ack + 1)%(MAX_SEQ + 1) ,DATA_TIMER);
 				stop_ack_timer();
 			}
 			while (between(ack_expected, f.ack, next_frame_to_send) == true)
 			{
 				nbuffered--;
-				stop_timer(ack_expected % NR_BUF);
+				stop_timer(ack_expected);
 				INC(ack_expected);
 			}
 			break;
 		case DATA_TIMEOUT:
+			dbg_event("time_seq:%d\n", timeout_seq);
 			send_frame_to_physical(FRAME_DATA, timeout_seq , frame_expected
 				, out_buf[timeout_seq % NR_BUF], out_packet_len[timeout_seq % NR_BUF]);
-			start_timer(timeout_seq % NR_BUF, DATA_TIMER);
+			start_timer(timeout_seq, DATA_TIMER);
 			stop_ack_timer();
 			break;
 		case ACK_TIMEOUT:
